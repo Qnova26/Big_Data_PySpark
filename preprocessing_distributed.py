@@ -95,5 +95,14 @@ df_clean.write.format("mongodb") \
     .mode("overwrite") \
     .save()
 
+# Masukkan IP ezza 
+TEMAN_IP = "10.62.96.117" 
+print(f"📤 [2/2] Mereplikasi Data Bersih ke MongoDB Laptop Worker ({TEMAN_IP})...")
+df_clean.write.format("mongodb") \
+    .option("connection.uri", f"mongodb://{TEMAN_IP}:27017/capstone_db") \
+    .option("collection", "Clean_Data") \
+    .mode("overwrite") \
+    .save()
+
 print("PREPROCESSING TERDISTRIBUSI SELESAI!")
 spark.stop()
