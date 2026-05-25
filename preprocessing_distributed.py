@@ -4,7 +4,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, regexp_replace, lower, trim
 
 # --- 1. KONFIGURASI JARINGAN & ENVIRONMENT ---
-MASTER_IP = "10.62.96.30" # Ganti dengan IP IPv4 Laptop Master kamu!
+MASTER_IP = "10.62.96.30" # IP sesuai dengan IP Laptop Master di jaringan
 MONGO_URI = f"mongodb://{MASTER_IP}:27017/capstone_db"
 
 if 'SPARK_HOME' in os.environ:
