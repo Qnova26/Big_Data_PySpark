@@ -2,6 +2,7 @@ import os
 import sys
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, regexp_replace, lower, trim
+from pyspark.sql.functions import col, lit, from_unixtime, to_timestamp
 
 # --- 1. KONFIGURASI JARINGAN & ENVIRONMENT ---
 MASTER_IP = "10.62.96.30" # IP sesuai dengan IP Laptop Master di jaringan
@@ -41,22 +42,39 @@ df_ps = spark.read.format("mongodb").option("collection", "Data_PlayStore").load
 df_yt = spark.read.format("mongodb").option("collection", "Data_YouTube").load()
 df_qu = spark.read.format("mongodb").option("collection", "Data_Quora").load()
 
-# --- 5. SCHEMA ALIGNMENT (Mengambil Kolom Inti Saja) ---
-# PlayStore memiliki r['content'], YouTube memiliki comment['text'], Quora memiliki raw_text
-print("Menyelaraskan Struktur Kolom (Schema Evolution)...")
+
+
+# --- 5. SCHEMA ALIGNMENT (Menyelaraskan Kolom & Menambahkan Tanggal) ---
+print("🔄 Menyelaraskan Struktur Kolom Ekstensif (Evolusi Skema)...")
+
+# --- A. PLAYSTORE ALIGNMENT ---
+# Menyelamatkan waktu, rating (score), dan jumlah like
 df_ps_std = df_ps.select(
     col("source_app_name").alias("app_name"), 
-    col("content").alias("raw_text")
+    col("content").alias("raw_text"),
+    to_timestamp(col("at")).alias("created_at"), # Konversi ISO Date ke Timestamp
+    col("score").cast("integer").alias("rating"), # Simpan bintang 1-5
+    col("thumbsUpCount").cast("integer").alias("engagement") # Simpan jumlah like
 )
 
+# --- B. YOUTUBE ALIGNMENT ---
+# Menyelamatkan Epoch time dan votes
 df_yt_std = df_yt.select(
-    col("source_url").alias("app_name"), # Kita gunakan URL sebagai identifier video
-    col("text").alias("raw_text")
+    col("source_url").alias("app_name"), 
+    col("text").alias("raw_text"),
+    from_unixtime(col("time_parsed")).cast("timestamp").alias("created_at"), # Konversi Float Epoch ke Timestamp
+    lit(None).cast("integer").alias("rating"), # YouTube tidak punya rating 1-5, isi Null
+    col("votes").cast("integer").alias("engagement") # Simpan jumlah like/votes
 )
 
+# --- C. QUORA ALIGNMENT ---
+# Mengisi kolom yang tidak ada dengan Null agar struktur union sejajar
 df_qu_std = df_qu.select(
     col("source_url").alias("app_name"), 
-    col("raw_text")
+    col("raw_text"),
+    lit(None).cast("timestamp").alias("created_at"), 
+    lit(None).cast("integer").alias("rating"), 
+    lit(None).cast("integer").alias("engagement") 
 )
 
 # --- 6. TRANSFORM: Penggabungan dan Pembersihan ---
