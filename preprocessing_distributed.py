@@ -5,7 +5,7 @@ from pyspark.sql.functions import col, regexp_replace, lower, trim
 from pyspark.sql.functions import col, lit, from_unixtime, to_timestamp
 
 # --- 1. KONFIGURASI JARINGAN & ENVIRONMENT ---
-MASTER_IP = "10.62.96.30" # IP sesuai dengan IP Laptop Master di jaringan
+MASTER_IP = "10.245.60.30" # IP sesuai dengan IP Laptop Master di jaringan
 MONGO_URI = f"mongodb://{MASTER_IP}:27017/capstone_db"
 
 if 'SPARK_HOME' in os.environ:
@@ -96,7 +96,7 @@ df_clean.write.format("mongodb") \
     .save()
 
 # Masukkan IP ezza 
-TEMAN_IP = "10.62.96.117" 
+TEMAN_IP = "10.245.60.117" 
 print(f"📤 [2/2] Mereplikasi Data Bersih ke MongoDB Laptop Worker ({TEMAN_IP})...")
 df_clean.write.format("mongodb") \
     .option("connection.uri", f"mongodb://{TEMAN_IP}:27017/capstone_db") \
