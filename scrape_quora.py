@@ -7,26 +7,55 @@ client = pymongo.MongoClient("mongodb://127.0.0.1:27017/")
 db = client["capstone_db"]
 collection = db["Data_Quora"]
 
-ANSWER_SELECTORS = [
-    "div.q-box.qu-userSelect--text span",
-    "div[class*='q-text'] span",
-    "div.puppeteer_test_answer_content span",
-    "div[data-testid='answer'] span",
-]
-
-async def _collect_raw_texts(page) -> list:
-    found = []
-    for sel in ANSWER_SELECTORS:
-        try:
-            elements = await page.query_selector_all(sel)
-            for el in elements:
-                # Mengambil teks apa adanya (mentah)
-                txt = await el.inner_text()
-                if len(txt) > 30: 
-                    found.append(txt)
-        except Exception:
-            continue
-    return found
+async def _collect_posts_with_time(page) -> list:
+    """
+    Mengekstrak teks dan waktu secara bersamaan menggunakan eksekusi JavaScript di dalam DOM Quora.
+    """
+    script = """
+    () => {
+        const results = [];
+        // Mencari kotak kontainer yang membungkus seluruh postingan/jawaban
+        const containers = document.querySelectorAll('div.puppeteer_test_answer, div.q-box.qu-borderBottom, div.q-box.qu-mb--sm');
+        
+        for (const container of containers) {
+            // 1. Ekstrak Teks Jawaban
+            const textEl = container.querySelector('.q-box.qu-userSelect--text, .puppeteer_test_answer_content');
+            if (!textEl) continue;
+            
+            const text = textEl.innerText.trim();
+            if (text.length < 30) continue; // Abaikan teks yang terlalu pendek
+            
+            // 2. Ekstrak Waktu (Timestamp)
+            let timeStr = null;
+            // Waktu Quora biasanya disembunyikan di tag <a> atau <span>
+            const timeElements = container.querySelectorAll('a, span');
+            
+            for (const el of timeElements) {
+                const txt = el.innerText.trim();
+                
+                // Deteksi pola waktu Quora: "Answered Jan 23", "Updated 2022", "1y", "2mo", "4h"
+                if (txt.includes('Answered') || txt.includes('Updated') || txt.includes('Posted') || 
+                    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d+/.test(txt) || 
+                    /^\d+[mhdwys]$/.test(txt)) {
+                    timeStr = txt;
+                    break;
+                }
+            }
+            
+            results.push({
+                raw_text: text,
+                created_at: timeStr || "Unknown" // Beri label Unknown jika benar-benar tidak ada
+            });
+        }
+        return results;
+    }
+    """
+    try:
+        # Eksekusi JS dan ambil hasilnya berupa list of dictionaries
+        return await page.evaluate(script)
+    except Exception as e:
+        print(f"Error saat ekstrak DOM: {e}")
+        return []
 
 async def scrape_quora_posts(urls: list, target_per_page: int = 500):
     all_records = []
@@ -38,7 +67,7 @@ async def scrape_quora_posts(urls: list, target_per_page: int = 500):
         )
 
         for url in urls:
-            print(f"\nMembuka: {url}")
+            print(f"\n🌐 Membuka: {url}")
             page = await context.new_page()
             
             try:
@@ -49,42 +78,54 @@ async def scrape_quora_posts(urls: list, target_per_page: int = 500):
             
             await asyncio.sleep(random.randint(5, 10))
             
-            page_texts = set()
+            # Menggunakan dictionary untuk mencegah duplikasi data berdasarkan raw_text
+            page_data = {} 
             scroll_step = 1000
             
             for scroll_i in range(1, 100):
                 try:
                     await page.evaluate(f"window.scrollBy(0, {scroll_step})")
-                    new_texts = await _collect_raw_texts(page)
-                    page_texts.update(new_texts)
-                    if len(page_texts) >= target_per_page: break
+                    
+                    # Ambil data (Teks + Waktu)
+                    new_posts = await _collect_posts_with_time(page)
+                    
+                    for post in new_posts:
+                        # Masukkan ke dict, raw_text sebagai key agar otomatis unik
+                        page_data[post['raw_text']] = post['created_at']
+                        
+                    print(f"  [Scroll {scroll_i}] Terkumpul: {len(page_data)}/{target_per_page} dokumen unik")
+                    
+                    if len(page_data) >= target_per_page: 
+                        break
+                        
                     await asyncio.sleep(random.uniform(2.0, 4.0))
                 except Exception:
                     break
             
-            collected = list(page_texts)[:target_per_page]
-            for text in collected:
-                # Simpan mentah-mentah (raw text)
+            # Format ulang data sebelum dimasukkan ke list utama
+            collected_texts = list(page_data.keys())[:target_per_page]
+            for text in collected_texts:
                 all_records.append({
                     "raw_text": text,
+                    "created_at": page_data[text], # Waktu diselipkan di sini!
                     "source_url": url
                 })
+                
             await page.close()
         await browser.close()
         
     if all_records:
-        print("\nMenyimpan ke MongoDB (Data_Quora)...")
-        collection.delete_many({})
+        print("\n💾 Menyimpan ke MongoDB (Data_Quora)...")
+        collection.delete_many({}) # Bersihkan data lama
         collection.insert_many(all_records)
-        print(f"SUKSES! {len(all_records)} data RAW Quora tersimpan.")
+        print(f"✅ SUKSES! {len(all_records)} data RAW Quora (Teks + Waktu) tersimpan.")
 
 # --- Bagian Eksekusi ---
 if __name__ == "__main__":
-    print("🚀 Memulai Ekstraksi Quora (RAW MODE)...")
+    print("🚀 Memulai Ekstraksi Quora (RAW MODE + TIMESTAMP)...")
     
-    # Daftar URL Asli Tim Capstone Carlos
+    # Daftar URL Asli
     quora_urls = [
-        # ── Pertanyaan spesifik ──────────────────────────────────────────────
         "https://www.quora.com/What-is-the-best-e-wallet-in-Southeast-Asia",
         "https://www.quora.com/Which-e-wallet-is-the-safest-to-use",
         "https://www.quora.com/What-are-the-advantages-of-using-an-e-wallet",
@@ -93,8 +134,6 @@ if __name__ == "__main__":
         "https://www.quora.com/What-is-the-difference-between-GoPay-OVO-and-Dana",
         "https://www.quora.com/How-secure-are-digital-wallets",
         "https://www.quora.com/What-are-the-best-e-wallets-available-in-Indonesia",
-
-        # ── Topik / tag ──────────────────────────────────────────────────────
         "https://www.quora.com/topic/E-Wallets",
         "https://www.quora.com/topic/Digital-Wallets",
         "https://www.quora.com/topic/Mobile-Payments",
@@ -103,6 +142,5 @@ if __name__ == "__main__":
         "https://www.quora.com/topic/Dana-e-wallet",
     ]
     
-    # Jalankan proses Asynchronous
     asyncio.run(scrape_quora_posts(quora_urls, target_per_page=500))
     client.close()
